@@ -49,7 +49,7 @@ contract VeloOracle is IOracle {
         for (uint256 i = 1; i < 2; i++) {
             (uint256 b0, uint256 b1) = _getBalances(srcToken, dstToken, i == 0 ? true : false);
             uint256 w = b0 * b1;
-            rate = rate + b1 * 1e18 / b0 * w;
+            rate = rate + b1 * (1e18) / b0 * w;
             weight = weight + w;
         }
 
@@ -59,10 +59,9 @@ contract VeloOracle is IOracle {
         }
         }
         else {
-            address token0 = IUniswapV2Pair(_pairFor(srcToken, dstToken, false)).token0();
-            address token1 = IUniswapV2Pair(_pairFor(srcToken, dstToken, false)).token1();
+            address token0 = IUniswapV2Pair(_orderedPairFor(srcToken, dstToken, false)).token0();
+            address token1 = IUniswapV2Pair(_orderedPairFor(srcToken, dstToken, false)).token1();
             (uint256 b0, uint256 b1) = _getBalances(srcToken, dstToken, false);
-            //(address token0, address token1) = IUniswapV2Pair(_pairFor(srcToken, dstToken, false)).getTokens();
             rate = 0;
             weight = 0;
         }
@@ -70,6 +69,9 @@ contract VeloOracle is IOracle {
 
     // getting prices, while passing in connectors as an array
     function getRateWithConnectors(IERC20 srcToken, IERC20 dstToken, IERC20[] calldata connectors) external view returns (uint256 rate, uint256 weight) {
+        
+        // make absolute number larger to allow for better precision, for tokens priced under $0.000001
+        rate = 1000000;
 
         BalanceInfo memory balInfo;
         balInfo = BalanceInfo(0, 0, 0, 0, false, true, 0);
@@ -102,35 +104,46 @@ contract VeloOracle is IOracle {
             }
         }
 
+        if (balInfo.bal0 == 0 && balInfo.bal1 == 0) {
+            return (0, 0);
+        }
+
         // handle cases where direct route is the best/only route
         if (balInfo.isDirect) {
+
             // calculate ratio based on reserves for volatile pools
             if (!balInfo.isStable) {
 
                 uint256 w = balInfo.bal0 * balInfo.bal1;
-                rate = rate + balInfo.bal1 * 1e18 / balInfo.bal0 * w;
+                rate = (rate * balInfo.bal1 * 1e18) / balInfo.bal0 * w;
                 weight = weight + w;
 
                 if (weight > 0) {
                     unchecked { rate /= weight; }
                     weight = weight.sqrt();
                 }
+
             }
 
             // calculate ratio based on stableswap formula for stable pools
             else {
+
                 uint256 srcTokenDecimals = IERC20Decimals(address(srcToken)).decimals();
-                uint256 outputAmount = IVeloPair(_pairFor(srcToken, dstToken, true)).getAmountOut((10**srcTokenDecimals), address(srcToken));
-                rate = (outputAmount * 1e18) / (10**srcTokenDecimals);
+                address currentPair = _orderedPairFor(srcToken, dstToken, true);
+                uint256 newOut = IVeloPair(currentPair).getAmountOut((10**srcTokenDecimals), address(srcToken));
+
+                rate = (rate * (newOut * 1e18)) / (10**srcTokenDecimals);
+
             }
         }
+
         //non-direct route where first hop is a volatile pool
         else if (!balInfo.isStable) {
             SecondHopBalanceInfo memory hopBalInfo;
             hopBalInfo = SecondHopBalanceInfo(0, 0, 0, 0, false);
 
             uint256 w = balInfo.bal0 * balInfo.bal1;
-            rate = rate + balInfo.bal1 * 1e18 / balInfo.bal0 * w;
+            rate = (rate * balInfo.bal1 * 1e18) / balInfo.bal0 * w;
             weight = weight + w;
 
             if (weight > 0) {
@@ -162,17 +175,55 @@ contract VeloOracle is IOracle {
 
             }
             else {
+
                 uint256 connectorTokenDecimals = IERC20Decimals(address(connectors[balInfo.connectorInd])).decimals();
-                uint256 outputAmount = IVeloPair(_pairFor(connectors[balInfo.connectorInd], dstToken, true)).getAmountOut((10**connectorTokenDecimals), address(connectors[balInfo.connectorInd]));
+                uint256 outputAmount = IVeloPair(_orderedPairFor(connectors[balInfo.connectorInd], dstToken, true)).getAmountOut((10**connectorTokenDecimals), address(connectors[balInfo.connectorInd]));
                 uint256 nextRate = (outputAmount * 1e18) / (10**connectorTokenDecimals);
                 rate = (rate * nextRate) / 1e18;
-            }
 
+            }
 
         }
 
         //non-direct route where first hop is a stable pool
         else {
+
+            SecondHopBalanceInfo memory hopBalInfo;
+            hopBalInfo = SecondHopBalanceInfo(0, 0, 0, 0, false);
+
+            uint256 srcTokenDecimals = IERC20Decimals(address(srcToken)).decimals();
+            uint256 firstOutputAmount = IVeloPair(_orderedPairFor(srcToken, connectors[balInfo.connectorInd], true)).getAmountOut((10**srcTokenDecimals), address(srcToken));
+            rate = (rate * (firstOutputAmount * 1e18)) / (10**srcTokenDecimals);
+
+            (hopBalInfo.bal0, hopBalInfo.bal1) = _getBalances(connectors[balInfo.connectorInd], dstToken, false);
+            (hopBalInfo.bal2, hopBalInfo.bal3) = _getBalances(connectors[balInfo.connectorInd], dstToken, true);
+
+            if (hopBalInfo.bal2 > hopBalInfo.bal0) {
+                hopBalInfo.bal0 = hopBalInfo.bal2;
+                hopBalInfo.bal1 = hopBalInfo.bal3;
+                hopBalInfo.isStable = true;
+            }
+
+            if (!hopBalInfo.isStable) {
+
+                uint256 w2 = hopBalInfo.bal0 * hopBalInfo.bal1;
+                uint256 nextRate = hopBalInfo.bal1 * 1e18 / hopBalInfo.bal0 * w2;
+                weight = w2;
+
+                if (weight > 0) {
+                    unchecked { nextRate /= weight; }
+                    weight = weight.sqrt();
+                }
+
+                rate = (rate * nextRate) / 1e18;
+
+            }
+            else {
+                uint256 connectorTokenDecimals = IERC20Decimals(address(connectors[balInfo.connectorInd])).decimals();
+                uint256 outputAmount = IVeloPair(_orderedPairFor(connectors[balInfo.connectorInd], dstToken, true)).getAmountOut((10**connectorTokenDecimals), address(connectors[balInfo.connectorInd]));
+                uint256 nextRate = (outputAmount * 1e18) / (10**connectorTokenDecimals);
+                rate = (rate * nextRate) / 1e18;
+            }
 
         }
 
@@ -200,8 +251,15 @@ contract VeloOracle is IOracle {
             dstBalance = 0;
         }
         else {
-            (uint256 reserve0, uint256 reserve1,) = IUniswapV2Pair(_pairFor(token0, token1, stable)).getReserves();
+            //(uint256 reserve0, uint256 reserve1,) = IUniswapV2Pair(_pairFor(token0, token1, stable)).getReserves();
+            (uint256 reserve0, uint256 reserve1,) = IUniswapV2Pair(pairAddress).getReserves();
             (srcBalance, dstBalance) = srcToken == token0 ? (reserve0, reserve1) : (reserve1, reserve0);
         }
+    }
+
+    // fetch pair from tokens using correct order
+    function _orderedPairFor(IERC20 tokenA, IERC20 tokenB, bool stable) internal view returns (address pairAddress) {
+        (IERC20 token0, IERC20 token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+        pairAddress = _pairFor(token0, token1, stable);
     }
 }
