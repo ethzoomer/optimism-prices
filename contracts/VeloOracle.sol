@@ -14,6 +14,7 @@ contract VeloOracle {
 
     address public immutable factory;
     bytes32 public immutable initcodeHash;
+    uint8 maxHop = 10;
 
     constructor(address _factory, bytes32 _initcodeHash) {
         factory = _factory;
@@ -32,7 +33,6 @@ contract VeloOracle {
     // getting prices, while passing in connectors as an array
     // Assuming srcToken is the first entry of connectors, dstToken is the last entry of connectors
     function getRateWithConnectors(IERC20[] calldata connectors) external view returns (uint256 rate) {
-        uint8 maxHop = 10;
         uint256 cur_rate = 1;
         uint8 from_i = 0;
         IERC20 dstToken = connectors[connectors.length - 1];
@@ -45,8 +45,9 @@ contract VeloOracle {
 
         // Store visited connector indices
         uint8[] memory visited = new uint8[](connectors.length);
+        uint8 j_max = max(maxHop, uint8(connectors.length));
 
-        for (uint8 j = 0; j < maxHop; j++){
+        for (uint8 j = 0; j < j_max; j++){
             BalanceInfo memory balInfo; 
             IERC20 from;   
             balInfo = BalanceInfo(0, 0, false, 255, 255);
@@ -88,7 +89,8 @@ contract VeloOracle {
             from_i = to_i;
             // emit Log(j, to_i, visited, rate);
             cur_rate *= rate;
-            if (connectors[to_i] == dstToken) {return cur_rate/10**(6*j);}
+            if (j > 0){cur_rate /= 1e18;}
+            if (connectors[to_i] == dstToken) {return cur_rate;}
         }                                                            
         return 0;
     }
@@ -97,11 +99,11 @@ contract VeloOracle {
     function _volatileRate(uint256 b0, uint256 b1, int dec_diff) internal pure returns (uint256 rate){
         // b0 has less 0s
         if (dec_diff < 0){
-            rate = (1e6 * b1) / (b0 * 10**(uint(-dec_diff)));
+            rate = (1e18 * b1) / (b0 * 10**(uint(-dec_diff)));
         }
         // b0 has more 0s
         else{
-            rate = (1e6 * 10**(uint(dec_diff)) * b1) / b0;
+            rate = (1e18 * 10**(uint(dec_diff)) * b1) / b0;
         }
     }
 
@@ -113,11 +115,11 @@ contract VeloOracle {
 
         // t0 has less 0s
         if (dec_diff < 0){
-            rate = (1e6 * newOut) / (10**t0_dec * 10**(uint(-dec_diff)));
+            rate = (1e18 * newOut) / (10**t0_dec * 10**(uint(-dec_diff)));
         }
         // t0 has more 0s
         else{
-            rate = (1e6 * (newOut * 10**(uint(dec_diff)))) / (10**t0_dec);
+            rate = (1e18 * (newOut * 10**(uint(dec_diff)))) / (10**t0_dec);
         }
     }
 
@@ -151,5 +153,9 @@ contract VeloOracle {
     function _orderedPairFor(IERC20 tokenA, IERC20 tokenB, bool stable) internal view returns (address pairAddress) {
         (IERC20 token0, IERC20 token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
         pairAddress = _pairFor(token0, token1, stable);
+    }
+
+    function max(uint8 a, uint8 b) internal pure returns (uint8) {
+        return a >= b ? a : b;
     }
 }
