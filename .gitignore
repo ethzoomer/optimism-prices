@@ -6,3 +6,4 @@ build/
 reports/
 contracts/VeloOracle_test.sol
 scripts/main.py
+./tokenlist.json

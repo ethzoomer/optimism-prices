@@ -5,23 +5,28 @@ import "../interfaces/IVeloPair.sol";
 import "../interfaces/IERC20Decimals.sol";
 import "../libraries/Sqrt.sol";
 import "../libraries/Address.sol";
+import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
+import {IPoolFactory} from "../interfaces/IPoolFactory.sol";
 
 contract VeloOracle {
     using Sqrt for uint256;
 
-    address public immutable factory;
-    bytes32 public immutable initcodeHash;
+    address public immutable factoryV1;
+    address public immutable factoryV2;
+    bytes32 public immutable initcodeHashV1;
     uint8 maxHop = 10;
 
-    constructor(address _factory, bytes32 _initcodeHash) {
-        factory = _factory;
-        initcodeHash = _initcodeHash;
+    constructor(address _factoryV1, address _factoryV2, bytes32 _initcodeHashV1) {
+        factoryV1 = _factoryV1;
+        factoryV2 = _factoryV2;
+        initcodeHashV1 = _initcodeHashV1;
     }
 
     struct BalanceInfo {
         uint256 bal0;
         uint256 bal1;
         bool isStable;
+        bool isV1;
     }
 
     struct Path {
@@ -32,6 +37,7 @@ contract VeloOracle {
     struct ReturnVal {
         bool mod;
         bool isStable;
+        bool isV1;
         uint256 bal0;
         uint256 bal1;
     }
@@ -52,12 +58,25 @@ contract VeloOracle {
     }
 
     function _get_bal(IERC20 from, IERC20 to, uint256 in_bal0) internal view returns (ReturnVal memory out) {
-        (uint256 b0, uint256 b1) = _getBalances(from, to, false);
-        (uint256 b2, uint256 b3) = _getBalances(from, to, true);
+        bool b0_v1; 
+        bool b2_v1;
+        (uint256 b0, uint256 b1) = _getBalances(from, to, false, false);
+        (uint256 temp0, uint256 temp1) = _getBalances(from, to, false, true);
+        if(b0 < temp0){
+            (b0, b1) = (temp0, temp1);
+            b0_v1 = true;
+        }
+
+        (uint256 b2, uint256 b3) = _getBalances(from, to, true, false);
+        (temp0, temp1) = _getBalances(from, to, true, true);
+        if(b2 < temp0){
+            (b2, b3) = (temp0, temp1); 
+            b2_v1 = true;
+        }
         if (b0 > in_bal0 || b2 > in_bal0) {
             out.mod = true;
-            if (b0 > b2) {(out.bal0, out.bal1, out.isStable) = (b0,b1,false);}
-            else {(out.bal0, out.bal1, out.isStable) = (b2,b3,true);}         
+            if (b0 > b2) {(out.bal0, out.bal1, out.isStable, out.isV1) = (b0,b1,false,b0_v1);}
+            else {(out.bal0, out.bal1, out.isStable, out.isV1) = (b2,b3,true,b2_v1);}         
         }
     }
 
@@ -83,7 +102,7 @@ contract VeloOracle {
             arr.visited = new uint8[](connectors.length - src_len);
             // Counting hops
             for (uint8 j = 0; j < j_max; j++){
-                BalanceInfo memory balInfo = BalanceInfo(0, 0, false);
+                BalanceInfo memory balInfo = BalanceInfo(0, 0, false, false);
                 vars.to_i = 0;
                 // Going through all connectors
                 for (uint8 i = src_len; i < connectors.length; i++) {
@@ -100,6 +119,7 @@ contract VeloOracle {
                         balInfo.isStable = out.isStable;
                         balInfo.bal0 = out.bal0;
                         balInfo.bal1 = out.bal1;
+                        balInfo.isV1 = out.isV1;
                         vars.to_i = i;
                     }
                 }
@@ -109,7 +129,9 @@ contract VeloOracle {
                     break;
                 }
 
-                if (balInfo.isStable) {vars.rate = _stableRate(connectors[vars.from_i], connectors[vars.to_i], arr.decimals[vars.from_i] - arr.decimals[vars.to_i]);}
+                if (balInfo.isStable) {vars.rate = _stableRate(connectors[vars.from_i], connectors[vars.to_i], 
+                                                                arr.decimals[vars.from_i] - arr.decimals[vars.to_i],
+                                                                balInfo.isV1);}
                 else                  {vars.rate = _volatileRate(balInfo.bal0, balInfo.bal1, arr.decimals[vars.from_i] - arr.decimals[vars.to_i]);} 
                
                 vars.cur_rate *= vars.rate;
@@ -139,66 +161,6 @@ contract VeloOracle {
         return arr.rates;
     }
 
-    // getting prices, while passing in connectors as an array
-    // Assuming srcToken is the first entry of connectors, dstToken is the last entry of connectors
-    function getRateWithConnectors(IERC20[] memory connectors) external view returns (uint256 rate) {
-        uint256 cur_rate = 1;
-        uint8 from_i = 0;
-        IERC20 dstToken = connectors[connectors.length - 1];
-
-        // Caching decimals of all connector tokens
-        int[] memory decimals = new int[](connectors.length);
-        for (uint8 i = 0; i < connectors.length; i++){
-            decimals[i] = int(uint(connectors[i].decimals()));
-        }
-
-        // Store visited connector indices
-        uint8[] memory visited = new uint8[](connectors.length);
-        uint8 j_max = min(maxHop, uint8(connectors.length));
-
-        for (uint8 j = 0; j < j_max; j++){
-            BalanceInfo memory balInfo;
-            IERC20 from = connectors[from_i];
-            uint8 to_i = 0;
-            // Going through all connectors except for srcToken
-            for (uint8 i = 1; i < connectors.length; i++) {
-                // Check if the current connector has been used to prevent cycles
-                bool seen = false;
-                for (uint8 c = 0; c < j; c++){
-                    if (visited[c] == i){seen = true; break;}
-                }
-                if (seen) {continue;}
-                IERC20 to = connectors[i];
-                (uint256 b0, uint256 b1) = _getBalances(from, to, false);
-                (uint256 b2, uint256 b3) = _getBalances(from, to, true);
-
-                if (b0 > balInfo.bal0 || b2 > balInfo.bal0) {
-                    uint256 bal0; uint256 bal1; bool isStable;
-                    if (b0 > b2) {(bal0, bal1, isStable) = (b0,b1,false);}
-                    else {(bal0, bal1, isStable) = (b2,b3,true);}
-                    balInfo.isStable = isStable;
-                    balInfo.bal0 = bal0;
-                    balInfo.bal1 = bal1;
-                    to_i = i;
-                }
-            }
-
-            if (to_i == 0){
-                return 0;
-            }
-            if (balInfo.isStable) {rate = _stableRate(from, connectors[to_i], decimals[from_i] - decimals[to_i]);}
-            else                  {rate = _volatileRate(balInfo.bal0, balInfo.bal1, decimals[from_i] - decimals[to_i]);} 
-
-            visited[j] = to_i;
-            from_i = to_i;
-            cur_rate *= rate;
-            if (j > 0){cur_rate /= 1e18;}
-            if (connectors[to_i] == dstToken) {return cur_rate;}
-        }                                                            
-        return 0;
-    }
-
-
     function _volatileRate(uint256 b0, uint256 b1, int dec_diff) internal pure returns (uint256 rate){
         // b0 has less 0s
         if (dec_diff < 0){
@@ -210,9 +172,9 @@ contract VeloOracle {
         }
     }
 
-    function _stableRate(IERC20 t0, IERC20 t1, int dec_diff) internal view returns (uint256 rate){
+    function _stableRate(IERC20 t0, IERC20 t1, int dec_diff, bool isV1) internal view returns (uint256 rate){
         uint256 t0_dec = t0.decimals();
-        address currentPair = _orderedPairFor(t0, t1, true);
+        address currentPair = _orderedPairFor(t0, t1, true, isV1);
         // newOut in t1
         uint256 newOut = IVeloPair(currentPair).getAmountOut((10**t0_dec), address(t0));
 
@@ -227,19 +189,25 @@ contract VeloOracle {
     }
 
     // calculates the CREATE2 address for a pair without making any external calls
-    function _pairFor(IERC20 tokenA, IERC20 tokenB, bool stable) private view returns (address pair) {
-        pair = address(uint160(uint256(keccak256(abi.encodePacked(
-                hex"ff",
-                factory,
-                keccak256(abi.encodePacked(tokenA, tokenB, stable)),
-                initcodeHash
-            )))));
+    function _pairFor(IERC20 tokenA, IERC20 tokenB, bool stable, bool v1) private view returns (address pair) {
+        if (v1){
+            pair = address(uint160(uint256(keccak256(abi.encodePacked(
+                    hex"ff",
+                    factoryV1,
+                    keccak256(abi.encodePacked(tokenA, tokenB, stable)),
+                    initcodeHashV1
+                )))));
+        }
+        else{
+            bytes32 salt = keccak256(abi.encodePacked(token0, token1, stable));
+            pair = Clones.predictDeterministicAddress(IPoolFactory(factoryV2).implementation(), salt, factoryV2);          
+        }
     }
 
     // returns the reserves of a pool if it exists, preserving the order of srcToken and dstToken
-    function _getBalances(IERC20 srcToken, IERC20 dstToken, bool stable) internal view returns (uint256 srcBalance, uint256 dstBalance) {
+    function _getBalances(IERC20 srcToken, IERC20 dstToken, bool stable, bool v1) internal view returns (uint256 srcBalance, uint256 dstBalance) {
         (IERC20 token0, IERC20 token1) = srcToken < dstToken ? (srcToken, dstToken) : (dstToken, srcToken);
-        address pairAddress = _pairFor(token0, token1, stable);
+        address pairAddress = _pairFor(token0, token1, stable, v1);
 
         // if the pair doesn't exist, return 0
         if(!Address.isContract(pairAddress)) {
@@ -253,9 +221,9 @@ contract VeloOracle {
     }
 
     // fetch pair from tokens using correct order
-    function _orderedPairFor(IERC20 tokenA, IERC20 tokenB, bool stable) internal view returns (address pairAddress) {
+    function _orderedPairFor(IERC20 tokenA, IERC20 tokenB, bool stable, bool isV1) internal view returns (address pairAddress) {
         (IERC20 token0, IERC20 token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
-        pairAddress = _pairFor(token0, token1, stable);
+        pairAddress = _pairFor(token0, token1, stable, isV1);
     }
 
     function min(uint8 a, uint8 b) internal pure returns (uint8) {
