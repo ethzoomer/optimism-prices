@@ -8,14 +8,20 @@ The current state of token price APIs is not suitable for today's increasingly c
 
 # Usage
 
-Optimism Prices is currently deployed at `0xE50621a0527A43534D565B67D64be7C79807F269`. 
+Optimism Prices is currently deployed at `0xd688F768769173c8f6FE2f00aA6D2448674508F1`. 
 
-To retrieve the price of a token `A` denominated in token `B`, you'll need to call the `getRateWithConnectors` function.
-`getRateWithConnnectors` accepts one argument, an array of `connector` tokens. 
+To retrieve the price of tokens `A`, `B`, `C`, etc denominated in token `D`, you'll need to call the `getManyRatesWithConnectors` function.
+`getManyRatesWithConnnectors` accepts two arguments, an integer representing the number of tokens you wish to retrieve the prices of, and an array of `connector` tokens. 
 
-The first token in the array should be token `A`, the token that you want to find the price of, and the last token in the array should be token `B`, the token that you want to denominate in (frequently USDC or another stablecoin for most use cases). All of the tokens in the middle of the array should be tokens that you want the contract to check for liquid routes. If you know that there are a few specific assets that your token `A` is often paired against, try adding those tokens in the middle of the array. If you're calling the function for many arbitrary tokens as part of your dapp, we recommend always making calls with common pair tokens in the middle of the `connnectors` array, such as WETH, USDC, and OP. Below is an example of a `getRateWithConnnectors` call to retrieve the price of LDO denominated in USDC, checking wstETH and WETH when routing.
+The `connector` array argument should consist of the tokens that you wish to find the prices of at the front of the array, any tokens that you wish to use in your routing path when fetching prices, and finally the token that you want to denominate in (frequently USDC or another stablecoin).
 
-![Example](https://i.ibb.co/gyH1xZk/lidoprice.png)
+If you're calling the function for many arbitrary tokens as part of your dapp, we recommend making your call with common pair tokens in the middle of the `connectors` array, such as WETH, USDC, and OP. In the below example, we want to find the prices of OP, WBTC, OPTIDOGE, FXS, and LUSD. We make the first argument 5, indicating that the 5 tokens at the beginning of the `connectors` array are the ones we want to find the prices for. Then we include WETH, OP, VELO, SUSD, and FRAX as tokens to check when routing (note that we can still include OP in here despite OP also being one of the tokens that we are fetching the price for!), and finally we make USDC the last token in the array because this is what we wish to denominate in.
+
+The returned results are all always represented with 18 decimal places, regardless of the decimals of the token that you are fetching prices for or are denominating in.
+
+`getManyRatesWithConnectors` allows you to fetch the prices of 100+ tokens, with 30+ routing tokens, in a single RPC call!
+
+![Example](https://i.ibb.co/r0RF8rF/Screenshot-2023-02-04-at-11-22-42-PM.png)
 
 # To-do
 
