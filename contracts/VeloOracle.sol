@@ -199,7 +199,7 @@ contract VeloOracle {
                 )))));
         }
         else{
-            bytes32 salt = keccak256(abi.encodePacked(token0, token1, stable));
+            bytes32 salt = keccak256(abi.encodePacked(tokenA, tokenB, stable));
             pair = Clones.predictDeterministicAddress(IPoolFactory(factoryV2).implementation(), salt, factoryV2);          
         }
     }
