@@ -1,0 +1,14 @@
+compiler:
+    evm_version: null
+    solc:
+        version: 0.8.19
+        optimizer:
+            enabled: true
+            runs: 200
+        remappings:
+          - "@openzeppelin=OpenZeppelin/openzeppelin-contracts@4.9.0"
+    vyper:
+        version: null
+
+networks:
+  default: tenderly-op
