@@ -8,7 +8,7 @@ The current state of token price APIs is not suitable for today's increasingly c
 
 # Usage
 
-Optimism Prices is currently deployed at `0xE50621a0527A43534D565B67D64be7C79807F269`. 
+Optimism Prices is currently deployed at `0x395942C2049604a314d39F370Dfb8D87AAC89e16`. 
 
 To retrieve the price of a token `A` denominated in token `B`, you'll need to call the `getRateWithConnectors` function.
 `getRateWithConnnectors` accepts one argument, an array of `connector` tokens. 

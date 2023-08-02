@@ -11,4 +11,4 @@ compiler:
         version: null
 
 networks:
-  default: tenderly-op
+  default: optimism-main
