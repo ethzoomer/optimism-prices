@@ -1,9 +1,10 @@
+import os
 import requests
 import pandas as pd
 
 session = requests.Session()
 
-api_key = 'sSDjq4bVhSIbR9C9CoWqpzmID0LhZ8JH'
+api_key = os.getenv('DUNE_KEY', '')
 
 def run_request(link):
     finished = False
