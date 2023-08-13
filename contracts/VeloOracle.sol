@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BUSL-1.1
+
 pragma solidity ^0.8.13;
 pragma abicoder v2;
 
@@ -7,28 +9,42 @@ import "../libraries/Sqrt.sol";
 import "../libraries/Address.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {IPoolFactory} from "../interfaces/IPoolFactory.sol";
+import {IVeloOracle} from "../interfaces/IVeloOracle.sol";
 
-contract VeloOracle {
+/// @title VeloOracle
+/// @author velodrome.finance, @AkemiHomura-maow, @ethzoomer
+/// @notice An oracle contract to fetch and calculate rates for a given set of connectors
+/// @dev The routing is done by greedily choose the pool with the most amount of input tokens. 
+/// The DFS search is performed iteratively, and stops until we have reached the target token, 
+/// or when the max budget for search has been consumed.
+contract VeloOracle is IVeloOracle{
     using Sqrt for uint256;
 
+    /// @notice The address of the poolFactory contract
     address public immutable factoryV2;
+    
+    /// @notice Maximum number of hops allowed for rate calculations
     uint8 maxHop = 10;
 
+    /// @param _factoryV2 Address of the factory contract for Velo pairs
     constructor(address _factoryV2) {
         factoryV2 = _factoryV2;
     }
 
+    /// @notice Struct to hold balance information for a pair
     struct BalanceInfo {
         uint256 bal0;
         uint256 bal1;
         bool isStable;
     }
 
+    /// @notice Struct to hold path information including intermediate token index and rate
     struct Path {
         uint8 to_i;
         uint256 rate;
     }
 
+    /// @notice Struct to hold return value for balance fetching function
     struct ReturnVal {
         bool mod;
         bool isStable;
@@ -36,6 +52,7 @@ contract VeloOracle {
         uint256 bal1;
     }
 
+    /// @notice Struct to hold array variables used in rate calculation, to avoid stack too deep error
     struct Arrays {
         uint256[] rates;
         Path[] paths;
@@ -43,6 +60,7 @@ contract VeloOracle {
         uint8[] visited;
     }
 
+    /// @notice Struct to hold iteration variables used in rate calculation, to avoid stack too deep error
     struct IterVars {
         uint256 cur_rate;
         uint256 rate;
@@ -51,6 +69,11 @@ contract VeloOracle {
         bool seen;
     }
 
+    /// @notice Internal function to get balance of two tokens
+    /// @param from First token of the pair
+    /// @param to Second token of the pair
+    /// @param in_bal0 Initial balance of the first token
+    /// @return out ReturnVal structure with balance information
     function _get_bal(IERC20 from, IERC20 to, uint256 in_bal0) internal view returns (ReturnVal memory out) {
         (uint256 b0, uint256 b1) = _getBalances(from, to, false);
         (uint256 b2, uint256 b3) = _getBalances(from, to, true);
@@ -61,7 +84,11 @@ contract VeloOracle {
         }
     }
 
-    function getManyRatesWithConnectors(uint8 src_len, IERC20[] memory connectors) external view returns (uint256[] memory rates) {
+
+    /**
+     * @inheritdoc IVeloOracle
+     */
+    function getManyRatesWithConnectors(uint8 src_len, IERC20[] memory connectors) external override view returns (uint256[] memory rates) {
         uint8 j_max = min(maxHop, uint8(connectors.length - src_len ));
         Arrays memory arr;
         arr.rates = new uint256[]( src_len );
@@ -140,6 +167,13 @@ contract VeloOracle {
         return arr.rates;
     }
 
+
+    /// @notice Internal function to calculate the volatile rate for a pair
+    /// @dev For volatile pools, the price (negative derivative) is trivial and can be calculated by b1/b0
+    /// @param b0 Balance of the first token
+    /// @param b1 Balance of the second token
+    /// @param dec_diff Decimal difference between the two tokens
+    /// @return rate Calculated exchange rate, scaled by 1e18
     function _volatileRate(uint256 b0, uint256 b1, int dec_diff) internal pure returns (uint256 rate){
         // b0 has less 0s
         if (dec_diff < 0){
@@ -151,6 +185,16 @@ contract VeloOracle {
         }
     }
 
+
+    /// @notice Internal function to calculate the stable rate for a pair
+    /// @dev For stable pools, the price (negative derivative) is non-trivial to solve. The rate is thus obtained 
+    /// by simulating a trade of an amount equal to 1 unit of the first token (t0) 
+    /// in the pair and seeing how much of the second token (t1) that would buy, taking into consideration 
+    /// the difference in decimal places between the two tokens.
+    /// @param t0 First token of the pair
+    /// @param t1 Second token of the pair
+    /// @param dec_diff Decimal difference between the two tokens
+    /// @return rate Calculated exchange rate, scaled by 1e18
     function _stableRate(IERC20 t0, IERC20 t1, int dec_diff) internal view returns (uint256 rate){
         uint256 t0_dec = t0.decimals();
         address currentPair = _orderedPairFor(t0, t1, true);
@@ -167,13 +211,24 @@ contract VeloOracle {
         }
     }
 
-    // calculates the CREATE2 address for a pair without making any external calls
+    /// @notice Internal function to calculate the CREATE2 address for a pair without making any external calls
+    /// @dev Codes from https://github.com/velodrome-finance/contracts/blob/main/contracts/Router.sol#L102C7-L102C110
+    /// @param tokenA First token of the pair
+    /// @param tokenB Second token of the pair
+    /// @param stable Whether the pair is stable or not
+    /// @return pair Address of the pair
     function _pairFor(IERC20 tokenA, IERC20 tokenB, bool stable) private view returns (address pair) {
         bytes32 salt = keccak256(abi.encodePacked(tokenA, tokenB, stable));
         pair = Clones.predictDeterministicAddress(IPoolFactory(factoryV2).implementation(), salt, factoryV2);
     }
 
-    // returns the reserves of a pool if it exists, preserving the order of srcToken and dstToken
+
+    /// @notice Internal function to get the reserves of a pair, preserving the order of srcToken and dstToken
+    /// @param srcToken Source token of the pair
+    /// @param dstToken Destination token of the pair
+    /// @param stable Whether the pair is stable or not
+    /// @return srcBalance Reserve of the source token
+    /// @return dstBalance Reserve of the destination token
     function _getBalances(IERC20 srcToken, IERC20 dstToken, bool stable) internal view returns (uint256 srcBalance, uint256 dstBalance) {
         (IERC20 token0, IERC20 token1) = srcToken < dstToken ? (srcToken, dstToken) : (dstToken, srcToken);
         address pairAddress = _pairFor(token0, token1, stable);
@@ -189,12 +244,20 @@ contract VeloOracle {
         }
     }
 
-    // fetch pair from tokens using correct order
+    /// @notice Internal function to fetch the pair from tokens using correct order
+    /// @param tokenA First input token
+    /// @param tokenB Second input token
+    /// @param stable Whether the pair is stable or not
+    /// @return pairAddress Address of the ordered pair
     function _orderedPairFor(IERC20 tokenA, IERC20 tokenB, bool stable) internal view returns (address pairAddress) {
         (IERC20 token0, IERC20 token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
         pairAddress = _pairFor(token0, token1, stable);
     }
 
+    /// @notice Internal function to get the minimum of two uint8 values
+    /// @param a First value
+    /// @param b Second value
+    /// @return Minimum of the two values
     function min(uint8 a, uint8 b) internal pure returns (uint8) {
         return a < b ? a : b;
     }
