@@ -10,6 +10,7 @@ import "../interfaces/IERC20Decimals.sol";
 /// @dev The emitted events, incl. the token address and the fetched price, are indexed
 /// on Dune Analytics. The events serve as price feeds for tokens live on Velodrome pools.
 /// The table name is velodrome_v2_optimism.PriceFetcher_evt_PriceFetched on Dune.
+contract PriceFetcher{
     IVeloOracle public oracle;
     address public owner;
 
