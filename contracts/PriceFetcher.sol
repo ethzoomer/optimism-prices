@@ -3,14 +3,14 @@
 pragma solidity ^0.8.13;
 
 import "interfaces/IVeloOracle.sol";
-import "../interfaces/IERC20Decimals.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 /// @title PriceFetcher
 /// @notice A wrapper contract for VeloOracle. It emits events for fetched prices.
 /// @dev The emitted events, incl. the token address and the fetched price, are indexed
 /// on Dune Analytics. The events serve as price feeds for tokens live on Velodrome pools.
 /// The table name is velodrome_v2_optimism.PriceFetcher_evt_PriceFetched on Dune.
-contract PriceFetcher{
+contract PriceFetcher {
     IVeloOracle public oracle;
     address public owner;
 
@@ -29,7 +29,7 @@ contract PriceFetcher{
     /// @notice Changes the owner of the contract.
     /// @dev Can only be called by the current owner.
     /// @param _owner The address of the new owner.
-    function change_owner(address _owner) public{
+    function change_owner(address _owner) public {
         require(msg.sender == owner);
         owner = _owner;
     }
@@ -37,7 +37,7 @@ contract PriceFetcher{
     /// @notice Changes the oracle used for fetching prices.
     /// @dev Can only be called by the current owner.
     /// @param _oracle The address of the new VeloOracle.
-    function change_oracle(IVeloOracle _oracle) public{
+    function change_oracle(IVeloOracle _oracle) public {
         require(msg.sender == owner);
         oracle = _oracle;
     }
@@ -46,12 +46,12 @@ contract PriceFetcher{
     /// @dev Can only be called by the owner. Emits a PriceFetched event for each token.
     /// @param src_len The number of tokens to fetch prices for.
     /// @param connectors The list of tokens to fetch prices for.
-    function fetchPrices(uint8 src_len, IERC20[] memory connectors) public {
+    function fetchPrices(uint8 src_len, IERC20Metadata[] memory connectors) public {
         require(msg.sender == owner);
 
         uint256[] memory prices = oracle.getManyRatesWithConnectors(src_len, connectors);
 
-        for(uint8 i = 0; i < src_len; i++) {
+        for (uint8 i = 0; i < src_len; i++) {
             emit PriceFetched(address(connectors[i]), prices[i]);
         }
     }

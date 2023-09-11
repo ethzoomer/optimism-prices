@@ -4,7 +4,7 @@ pragma solidity ^0.8.13;
 pragma abicoder v2;
 
 import "../interfaces/IVeloPair.sol";
-import "../interfaces/IERC20Decimals.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "../libraries/Sqrt.sol";
 import "../libraries/Address.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
@@ -14,15 +14,15 @@ import {IVeloOracle} from "../interfaces/IVeloOracle.sol";
 /// @title VeloOracle
 /// @author velodrome.finance, @AkemiHomura-maow, @ethzoomer
 /// @notice An oracle contract to fetch and calculate rates for a given set of connectors
-/// @dev The routing is done by greedily choose the pool with the most amount of input tokens. 
-/// The DFS search is performed iteratively, and stops until we have reached the target token, 
+/// @dev The routing is done by greedily choose the pool with the most amount of input tokens.
+/// The DFS search is performed iteratively, and stops until we have reached the target token,
 /// or when the max budget for search has been consumed.
-contract VeloOracle is IVeloOracle{
+contract VeloOracle is IVeloOracle {
     using Sqrt for uint256;
 
     /// @notice The address of the poolFactory contract
     address public immutable factoryV2;
-    
+
     /// @notice Maximum number of hops allowed for rate calculations
     uint8 maxHop = 10;
 
@@ -56,7 +56,7 @@ contract VeloOracle is IVeloOracle{
     struct Arrays {
         uint256[] rates;
         Path[] paths;
-        int[] decimals;
+        int256[] decimals;
         uint8[] visited;
     }
 
@@ -74,22 +74,29 @@ contract VeloOracle is IVeloOracle{
     /// @param to Second token of the pair
     /// @param in_bal0 Initial balance of the first token
     /// @return out ReturnVal structure with balance information
-    function _get_bal(IERC20 from, IERC20 to, uint256 in_bal0) internal view returns (ReturnVal memory out) {
+    function _get_bal(IERC20Metadata from, IERC20Metadata to, uint256 in_bal0)
+        internal
+        view
+        returns (ReturnVal memory out)
+    {
         (uint256 b0, uint256 b1) = _getBalances(from, to, false);
         (uint256 b2, uint256 b3) = _getBalances(from, to, true);
         if (b0 > in_bal0 || b2 > in_bal0) {
             out.mod = true;
-            if (b0 > b2) {(out.bal0, out.bal1, out.isStable) = (b0,b1,false);}
-            else {(out.bal0, out.bal1, out.isStable) = (b2,b3,true);}         
+            if (b0 > b2) (out.bal0, out.bal1, out.isStable) = (b0, b1, false);
+            else (out.bal0, out.bal1, out.isStable) = (b2, b3, true);
         }
     }
-
 
     /**
      * @inheritdoc IVeloOracle
      */
-    function getManyRatesWithConnectors(uint8 src_len, IERC20[] memory connectors) external override view returns (uint256[] memory rates) {
-        uint8 j_max = min(maxHop, uint8(connectors.length - src_len ));
+    function getManyRatesWithConnectors(uint8 src_len, IERC20Metadata[] memory connectors)
+        external
+        view
+        returns (uint256[] memory rates)
+    {
+        uint8 j_max = min(maxHop, uint8(connectors.length - src_len));
         Arrays memory arr;
         arr.rates = new uint256[]( src_len );
         arr.paths = new Path[]( (connectors.length - src_len ));
@@ -97,19 +104,19 @@ contract VeloOracle is IVeloOracle{
 
         // Caching decimals of all connector tokens
         {
-            for (uint8 i = 0; i < connectors.length; i++){
-                arr.decimals[i] = int(uint(connectors[i].decimals()));
+            for (uint8 i = 0; i < connectors.length; i++) {
+                arr.decimals[i] = int256(uint256(connectors[i].decimals()));
             }
         }
-         
+
         // Iterating through srcTokens
-        for (uint8 src = 0; src < src_len; src++){
+        for (uint8 src = 0; src < src_len; src++) {
             IterVars memory vars;
             vars.cur_rate = 1;
             vars.from_i = src;
             arr.visited = new uint8[](connectors.length - src_len);
             // Counting hops
-            for (uint8 j = 0; j < j_max; j++){
+            for (uint8 j = 0; j < j_max; j++) {
                 BalanceInfo memory balInfo = BalanceInfo(0, 0, false);
                 vars.to_i = 0;
                 // Going through all connectors
@@ -117,13 +124,16 @@ contract VeloOracle is IVeloOracle{
                     // Check if the current connector has been used to prevent cycles
                     vars.seen = false;
                     {
-                        for (uint8 c = 0; c < j; c++){
-                            if (arr.visited[c] == i){vars.seen = true; break;}
+                        for (uint8 c = 0; c < j; c++) {
+                            if (arr.visited[c] == i) {
+                                vars.seen = true;
+                                break;
+                            }
                         }
                     }
-                    if (vars.seen) {continue;}
-                    ReturnVal memory out =  _get_bal(connectors[vars.from_i], connectors[i], balInfo.bal0);
-                    if (out.mod){
+                    if (vars.seen) continue;
+                    ReturnVal memory out = _get_bal(connectors[vars.from_i], connectors[i], balInfo.bal0);
+                    if (out.mod) {
                         balInfo.isStable = out.isStable;
                         balInfo.bal0 = out.bal0;
                         balInfo.bal1 = out.bal1;
@@ -131,42 +141,55 @@ contract VeloOracle is IVeloOracle{
                     }
                 }
 
-                if (vars.to_i == 0){
+                if (vars.to_i == 0) {
                     arr.rates[src] = 0;
                     break;
                 }
 
-                if (balInfo.isStable) {vars.rate = _stableRate(connectors[vars.from_i], connectors[vars.to_i], 
-                                                                arr.decimals[vars.from_i] - arr.decimals[vars.to_i]);}
-                else                  {vars.rate = _volatileRate(balInfo.bal0, balInfo.bal1, arr.decimals[vars.from_i] - arr.decimals[vars.to_i]);} 
-               
+                if (balInfo.isStable) {
+                    vars.rate = _stableRate(
+                        connectors[vars.from_i],
+                        connectors[vars.to_i],
+                        arr.decimals[vars.from_i] - arr.decimals[vars.to_i]
+                    );
+                } else {
+                    vars.rate =
+                        _volatileRate(balInfo.bal0, balInfo.bal1, arr.decimals[vars.from_i] - arr.decimals[vars.to_i]);
+                }
+
                 vars.cur_rate *= vars.rate;
-                if (j > 0){vars.cur_rate /= 1e18;}
+                if (j > 0) vars.cur_rate /= 1e18;
 
                 // If from_i points to a connector, cache swap rate for connectors[from_i] : connectors[to_i]
-                if (vars.from_i >= src_len){ arr.paths[vars.from_i - src_len] = Path(vars.to_i, vars.rate);}
+                if (vars.from_i >= src_len) {
+                    arr.paths[vars.from_i - src_len] = Path(vars.to_i, vars.rate);
+                }
                 // If from_i points to a srcToken, check if to_i is a connector which has already been expanded.
                 // If so, directly follow the cached path to dstToken to get the final rate.
                 else {
-                    if (arr.paths[vars.to_i - src_len].rate > 0){
-                        while (true){
+                    if (arr.paths[vars.to_i - src_len].rate > 0) {
+                        while (true) {
                             vars.cur_rate = vars.cur_rate * arr.paths[vars.to_i - src_len].rate / 1e18;
                             vars.to_i = arr.paths[vars.to_i - src_len].to_i;
-                            if (vars.to_i == connectors.length - 1) {arr.rates[src] = vars.cur_rate; break;}
+                            if (vars.to_i == connectors.length - 1) {
+                                arr.rates[src] = vars.cur_rate;
+                                break;
+                            }
                         }
                     }
                 }
                 arr.visited[j] = vars.to_i;
 
                 // Next token is dstToken, stop
-                if (vars.to_i == connectors.length - 1) {arr.rates[src] = vars.cur_rate; break;}
+                if (vars.to_i == connectors.length - 1) {
+                    arr.rates[src] = vars.cur_rate;
+                    break;
+                }
                 vars.from_i = vars.to_i;
-
             }
         }
         return arr.rates;
     }
-
 
     /// @notice Internal function to calculate the volatile rate for a pair
     /// @dev For volatile pools, the price (negative derivative) is trivial and can be calculated by b1/b0
@@ -174,40 +197,39 @@ contract VeloOracle is IVeloOracle{
     /// @param b1 Balance of the second token
     /// @param dec_diff Decimal difference between the two tokens
     /// @return rate Calculated exchange rate, scaled by 1e18
-    function _volatileRate(uint256 b0, uint256 b1, int dec_diff) internal pure returns (uint256 rate){
+    function _volatileRate(uint256 b0, uint256 b1, int256 dec_diff) internal pure returns (uint256 rate) {
         // b0 has less 0s
-        if (dec_diff < 0){
-            rate = (1e18 * b1) / (b0 * 10**(uint(-dec_diff)));
+        if (dec_diff < 0) {
+            rate = (1e18 * b1) / (b0 * 10 ** (uint256(-dec_diff)));
         }
         // b0 has more 0s
-        else{
-            rate = (1e18 * 10**(uint(dec_diff)) * b1) / b0;
+        else {
+            rate = (1e18 * 10 ** (uint256(dec_diff)) * b1) / b0;
         }
     }
 
-
     /// @notice Internal function to calculate the stable rate for a pair
-    /// @dev For stable pools, the price (negative derivative) is non-trivial to solve. The rate is thus obtained 
-    /// by simulating a trade of an amount equal to 1 unit of the first token (t0) 
-    /// in the pair and seeing how much of the second token (t1) that would buy, taking into consideration 
+    /// @dev For stable pools, the price (negative derivative) is non-trivial to solve. The rate is thus obtained
+    /// by simulating a trade of an amount equal to 1 unit of the first token (t0)
+    /// in the pair and seeing how much of the second token (t1) that would buy, taking into consideration
     /// the difference in decimal places between the two tokens.
     /// @param t0 First token of the pair
     /// @param t1 Second token of the pair
     /// @param dec_diff Decimal difference between the two tokens
     /// @return rate Calculated exchange rate, scaled by 1e18
-    function _stableRate(IERC20 t0, IERC20 t1, int dec_diff) internal view returns (uint256 rate){
+    function _stableRate(IERC20Metadata t0, IERC20Metadata t1, int256 dec_diff) internal view returns (uint256 rate) {
         uint256 t0_dec = t0.decimals();
         address currentPair = _orderedPairFor(t0, t1, true);
         // newOut in t1
-        uint256 newOut = IVeloPair(currentPair).getAmountOut((10**t0_dec), address(t0));
+        uint256 newOut = IVeloPair(currentPair).getAmountOut((10 ** t0_dec), address(t0));
 
         // t0 has less 0s
-        if (dec_diff < 0){
-            rate = (1e18 * newOut) / (10**t0_dec * 10**(uint(-dec_diff)));
+        if (dec_diff < 0) {
+            rate = (1e18 * newOut) / (10 ** t0_dec * 10 ** (uint256(-dec_diff)));
         }
         // t0 has more 0s
-        else{
-            rate = (1e18 * (newOut * 10**(uint(dec_diff)))) / (10**t0_dec);
+        else {
+            rate = (1e18 * (newOut * 10 ** (uint256(dec_diff)))) / (10 ** t0_dec);
         }
     }
 
@@ -217,11 +239,10 @@ contract VeloOracle is IVeloOracle{
     /// @param tokenB Second token of the pair
     /// @param stable Whether the pair is stable or not
     /// @return pair Address of the pair
-    function _pairFor(IERC20 tokenA, IERC20 tokenB, bool stable) private view returns (address pair) {
+    function _pairFor(IERC20Metadata tokenA, IERC20Metadata tokenB, bool stable) private view returns (address pair) {
         bytes32 salt = keccak256(abi.encodePacked(tokenA, tokenB, stable));
         pair = Clones.predictDeterministicAddress(IPoolFactory(factoryV2).implementation(), salt, factoryV2);
     }
-
 
     /// @notice Internal function to get the reserves of a pair, preserving the order of srcToken and dstToken
     /// @param srcToken Source token of the pair
@@ -229,16 +250,20 @@ contract VeloOracle is IVeloOracle{
     /// @param stable Whether the pair is stable or not
     /// @return srcBalance Reserve of the source token
     /// @return dstBalance Reserve of the destination token
-    function _getBalances(IERC20 srcToken, IERC20 dstToken, bool stable) internal view returns (uint256 srcBalance, uint256 dstBalance) {
-        (IERC20 token0, IERC20 token1) = srcToken < dstToken ? (srcToken, dstToken) : (dstToken, srcToken);
+    function _getBalances(IERC20Metadata srcToken, IERC20Metadata dstToken, bool stable)
+        internal
+        view
+        returns (uint256 srcBalance, uint256 dstBalance)
+    {
+        (IERC20Metadata token0, IERC20Metadata token1) =
+            srcToken < dstToken ? (srcToken, dstToken) : (dstToken, srcToken);
         address pairAddress = _pairFor(token0, token1, stable);
 
         // if the pair doesn't exist, return 0
-        if(!Address.isContract(pairAddress)) {
+        if (!Address.isContract(pairAddress)) {
             srcBalance = 0;
             dstBalance = 0;
-        }
-        else {
+        } else {
             (uint256 reserve0, uint256 reserve1,) = IVeloPair(pairAddress).getReserves();
             (srcBalance, dstBalance) = srcToken == token0 ? (reserve0, reserve1) : (reserve1, reserve0);
         }
@@ -249,8 +274,12 @@ contract VeloOracle is IVeloOracle{
     /// @param tokenB Second input token
     /// @param stable Whether the pair is stable or not
     /// @return pairAddress Address of the ordered pair
-    function _orderedPairFor(IERC20 tokenA, IERC20 tokenB, bool stable) internal view returns (address pairAddress) {
-        (IERC20 token0, IERC20 token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+    function _orderedPairFor(IERC20Metadata tokenA, IERC20Metadata tokenB, bool stable)
+        internal
+        view
+        returns (address pairAddress)
+    {
+        (IERC20Metadata token0, IERC20Metadata token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
         pairAddress = _pairFor(token0, token1, stable);
     }
 
