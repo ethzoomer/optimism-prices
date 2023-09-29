@@ -17,8 +17,14 @@ def run_request(link):
             continue
     return response.json()
 
-def get_tokens():
+def get_tokens_op():
     url = "https://api.dune.com/api/v1/query/2678719/results?api_key=" + api_key
+    response = pd.DataFrame(run_request(url))
+    actual_data = response.loc['rows', 'result']
+    return [element['token'] for element in actual_data], [element['symbol'] for element in actual_data]
+
+def get_tokens_base():
+    url = "https://api.dune.com/api/v1/query/2982762/results?api_key=" + api_key
     response = pd.DataFrame(run_request(url))
     actual_data = response.loc['rows', 'result']
     return [element['token'] for element in actual_data], [element['symbol'] for element in actual_data]
