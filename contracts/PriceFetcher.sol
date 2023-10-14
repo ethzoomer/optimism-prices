@@ -13,6 +13,7 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 contract PriceFetcher {
     IVeloOracle public oracle;
     address public owner;
+    mapping(address => bool) public callers;
 
     /// @notice Emitted when a price for a token is fetched.
     /// @param token The address of the token.
@@ -24,6 +25,22 @@ contract PriceFetcher {
     constructor(IVeloOracle _oracle) {
         oracle = _oracle;
         owner = msg.sender;
+    }
+
+    /// @notice Adds a caller to the callers set.
+    /// @dev Can only be called by the owner.
+    /// @param _caller The address to be added.
+    function add_caller(address _caller) public {
+        require(msg.sender == owner);
+        callers[_caller] = true;
+    }
+
+    /// @notice Removes an caller from callers set.
+    /// @dev Can only be called by the owner.
+    /// @param _caller The address to be removed.
+    function remove_caller(address _caller) public {
+        require(msg.sender == owner);
+        callers[_caller] = false;
     }
 
     /// @notice Changes the owner of the contract.
@@ -47,7 +64,7 @@ contract PriceFetcher {
     /// @param src_len The number of tokens to fetch prices for.
     /// @param connectors The list of tokens to fetch prices for.
     function fetchPrices(uint8 src_len, IERC20Metadata[] memory connectors) public {
-        require(msg.sender == owner);
+        require(msg.sender == owner || callers[msg.sender]);
 
         uint256[] memory prices = oracle.getManyRatesWithConnectors(src_len, connectors);
 
