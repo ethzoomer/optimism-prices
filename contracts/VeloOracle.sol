@@ -154,8 +154,14 @@ contract VeloOracle {
     function _stableRate(IERC20 t0, IERC20 t1, int dec_diff) internal view returns (uint256 rate){
         uint256 t0_dec = t0.decimals();
         address currentPair = _orderedPairFor(t0, t1, true);
+        uint256 newOut = 0;
+
         // newOut in t1
-        uint256 newOut = IVeloPair(currentPair).getAmountOut((10**t0_dec), address(t0));
+        try IVeloPair(currentPair).getAmountOut((10**t0_dec), address(t0)) returns (uint256 result) {
+            newOut = result;
+        } catch {
+            return 0;
+        }
 
         // t0 has less 0s
         if (dec_diff < 0){
