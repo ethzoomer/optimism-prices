@@ -14,34 +14,49 @@ contract PriceFetcher {
     IVeloOracle public oracle;
     address public owner;
     mapping(address => bool) public callers;
-    address[] public source_tokens;
-    address[] public connectors;
+    IERC20Metadata[] private source_tokens;
+    IERC20Metadata[] private connectors;
+    IERC20Metadata private USDC;
+
+    function get_tokens(bool is_connector) public view returns (address[] memory results) {
+        IERC20Metadata[] storage arr = is_connector ? connectors : source_tokens;
+        results = new address[](arr.length);
+        for (uint256 i = 0; i < arr.length; i++) {
+            results[i] = address(arr[i]);
+        }
+    }
 
     function add_tokens(bool is_connector, address[] calldata _tokens) public{
         _only_owner();
-        address[] storage arr = is_connector ? connectors : source_tokens;
-        for (uint i = 0; i < _tokens.length; i++) {
-            arr.push(_tokens[i]);
+        IERC20Metadata[] storage arr = is_connector ? connectors : source_tokens;
+        for (uint256 i = 0; i < _tokens.length; i++) {
+            arr.push( IERC20Metadata(_tokens[i]) );
         }
     }
 
     function remove_tokens(bool is_connector, uint256[] calldata _indices) public{
         _only_owner();
-        address[] storage arr = is_connector ? connectors : source_tokens;
-        for (uint i = 0; i < _indices.length; i++) {
+        IERC20Metadata[] storage arr = is_connector ? connectors : source_tokens;
+        for (uint256 i = 0; i < _indices.length; i++) {
             arr[_indices[i]] = arr[arr.length - 1];
             arr.pop();
         }
     }
 
+    function change_USDC(address _USDC) public{
+        _only_owner();
+        USDC = IERC20Metadata(_USDC);
+    }
+
     function _construct_oracle_args(uint256 _src_len, uint256 _src_offset) internal view returns (IERC20Metadata[] memory oracle_args){
-        oracle_args = new IERC20Metadata[]( _src_len + connectors.length );
-        for (uint i = _src_offset; i < _src_offset + _src_len; i++) {
-            oracle_args[i - _src_offset] = IERC20Metadata(source_tokens[i]);
+        oracle_args = new IERC20Metadata[]( _src_len + connectors.length + 1);
+        for (uint256 i = _src_offset; i < _src_offset + _src_len; i++) {
+            oracle_args[i - _src_offset] = source_tokens[i];
         }
-        for (uint i = _src_len; i < oracle_args.length; i++) {
-            oracle_args[i] = IERC20Metadata(connectors[i - _src_len]);
+        for (uint256 i = _src_len; i < oracle_args.length - 1; i++) {
+            oracle_args[i] = connectors[i - _src_len];
         }
+        oracle_args[oracle_args.length - 1] = USDC;
     }
 
     /// @notice Emitted when a price for a token is fetched.
@@ -51,9 +66,10 @@ contract PriceFetcher {
 
     /// @notice Creates a new PriceFetcher contract.
     /// @param _oracle The address of the VeloOracle to use for fetching prices.
-    constructor(IVeloOracle _oracle) {
+    constructor(IVeloOracle _oracle, address _USDC) {
         oracle = _oracle;
         owner = msg.sender;
+        USDC = IERC20Metadata(_USDC);
     }
 
     function _only_owner() internal view{
@@ -102,7 +118,7 @@ contract PriceFetcher {
         uint256[] memory prices = oracle.getManyRatesWithConnectors(uint8(_src_len), _construct_oracle_args(_src_len, _src_offset));
 
         for (uint i = _src_offset; i < _src_offset + _src_len; i++) {
-            emit PriceFetched(source_tokens[i], prices[i - _src_offset]);
+            emit PriceFetched( address(source_tokens[i]), prices[i - _src_offset]);
         }
     }
 
