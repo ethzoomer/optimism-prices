@@ -10,9 +10,11 @@ import "../libraries/Address.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {IPoolFactory} from "../interfaces/IPoolFactory.sol";
 import {IVeloOracle} from "../interfaces/IVeloOracle.sol";
+import {ICLFactory} from "../interfaces/ICLFactory.sol";
+import {ICLPool} from "../interfaces/ICLPool.sol";
 
 /// @title VeloOracle
-/// @author velodrome.finance, @AkemiHomura-maow, @ethzoomer
+/// @author @AkemiHomura-maow, @ethzoomer
 /// @notice An oracle contract to fetch and calculate rates for a given set of connectors
 /// @dev The routing is done by greedily choose the pool with the most amount of input tokens.
 /// The DFS search is performed iteratively, and stops until we have reached the target token,
@@ -22,13 +24,17 @@ contract VeloOracle is IVeloOracle {
 
     /// @notice The address of the poolFactory contract
     address public immutable factoryV2;
+    ICLFactory public immutable CLFactory;
+
+    mapping(address => mapping(address => ICLPool[])) public enabledCLPools;
 
     /// @notice Maximum number of hops allowed for rate calculations
     uint8 maxHop = 10;
 
     /// @param _factoryV2 Address of the factory contract for Velo pairs
-    constructor(address _factoryV2) {
+    constructor(address _factoryV2, address _CLFactory) {
         factoryV2 = _factoryV2;
+        CLFactory = ICLFactory(_CLFactory);
     }
 
     /// @notice Struct to hold balance information for a pair
@@ -69,23 +75,65 @@ contract VeloOracle is IVeloOracle {
         bool seen;
     }
 
+    struct CLPairParams{
+        address tokenA;
+        address tokenB;
+        int24 tickSpacing;
+    }
+
+    function enableCLPairTickSpacing(CLPairParams[] calldata params) public{
+        for (uint256 i; i < params.length; i++){
+            CLPairParams memory param = params[i];
+            address pair = CLFactory.getPool(param.tokenA, param.tokenB, param.tickSpacing);
+            require(pair != address(0x0));
+            enabledCLPools[param.tokenA][param.tokenB].push( ICLPool(pair) );
+            enabledCLPools[param.tokenB][param.tokenA].push( ICLPool(pair) );
+        }
+    }
+
     /// @notice Internal function to get balance of two tokens
     /// @param from First token of the pair
     /// @param to Second token of the pair
     /// @param in_bal0 Initial balance of the first token
     /// @return out ReturnVal structure with balance information
-    function _get_bal(IERC20Metadata from, IERC20Metadata to, uint256 in_bal0)
+    function _getBal(IERC20Metadata from, IERC20Metadata to, uint256 in_bal0)
         internal
         view
         returns (ReturnVal memory out)
     {
         (uint256 b0, uint256 b1) = _getBalances(from, to, false);
         (uint256 b2, uint256 b3) = _getBalances(from, to, true);
-        if (b0 > in_bal0 || b2 > in_bal0) {
-            out.mod = true;
-            if (b0 > b2) (out.bal0, out.bal1, out.isStable) = (b0, b1, false);
-            else (out.bal0, out.bal1, out.isStable) = (b2, b3, true);
+        (uint256 b4, uint256 b5) = _getVirtualBalances(from, to);
+
+        uint256 maxBalance = in_bal0;
+        uint256 maxPair1;
+        uint256 maxPair2;
+        bool isMaxStable;
+
+        if (b0 > maxBalance) {
+            maxBalance = b0;
+            maxPair1 = b0;
+            maxPair2 = b1;
+            isMaxStable = false;
         }
+        if (b2 > maxBalance) {
+            maxBalance = b2;
+            maxPair1 = b2;
+            maxPair2 = b3;
+            isMaxStable = true;
+        }
+        if (b4 > maxBalance) {
+            maxBalance = b4;
+            maxPair1 = b4;
+            maxPair2 = b5;
+            isMaxStable = false;
+        }
+
+        if (maxBalance > in_bal0) {
+            out.mod = true;
+            (out.bal0, out.bal1, out.isStable) = (maxPair1, maxPair2, isMaxStable);
+        }
+
     }
 
     /**
@@ -132,7 +180,7 @@ contract VeloOracle is IVeloOracle {
                         }
                     }
                     if (vars.seen) continue;
-                    ReturnVal memory out = _get_bal(connectors[vars.from_i], connectors[i], balInfo.bal0);
+                    ReturnVal memory out = _getBal(connectors[vars.from_i], connectors[i], balInfo.bal0);
                     if (out.mod) {
                         balInfo.isStable = out.isStable;
                         balInfo.bal0 = out.bal0;
@@ -275,6 +323,33 @@ contract VeloOracle is IVeloOracle {
         }
     }
 
+    function _getVirtualBalances(IERC20Metadata srcToken, IERC20Metadata dstToken)
+        internal
+        view
+        returns (uint256 srcVirtualBalance, uint256 dstVirtualBalance){
+
+            uint256 maxLiquidity;
+            bool isSrcToken0 = srcToken < dstToken;
+            ICLPool[] memory pools = enabledCLPools[address(srcToken)][address(dstToken)];
+
+            for(uint256 i; i < pools.length; i++){
+                ICLPool pool = pools[i];
+                uint256 liquidity = uint256(pool.liquidity());
+
+                if (liquidity > maxLiquidity){
+                    (uint160 sqrtPriceX96, , , , ,) = pool.slot0();
+
+                    (srcVirtualBalance, dstVirtualBalance) = 
+                        isSrcToken0 ? 
+                            ( (liquidity << 96) / sqrtPriceX96           , (liquidity * (sqrtPriceX96 >> 32 ) ) >> 64 )
+                        :   ( (liquidity * (sqrtPriceX96 >> 32 ) ) >> 64 , (liquidity << 96) / sqrtPriceX96  );
+                    
+                    maxLiquidity = liquidity;
+                }
+            }
+
+        }
+
     /// @notice Internal function to fetch the pair from tokens using correct order
     /// @param tokenA First input token
     /// @param tokenB Second input token
@@ -297,3 +372,4 @@ contract VeloOracle is IVeloOracle {
         return a < b ? a : b;
     }
 }
+
