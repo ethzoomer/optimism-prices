@@ -75,12 +75,14 @@ contract VeloOracle is IVeloOracle {
         bool seen;
     }
 
+    /// @notice Struct to hold variables needed to identify CL pools
     struct CLPairParams{
         address tokenA;
         address tokenB;
         int24 tickSpacing;
     }
 
+    /// @notice Permissioned function to enable routing through certain CL
     function enableCLPairTickSpacing(CLPairParams[] calldata params) public{
         for (uint256 i; i < params.length; i++){
             CLPairParams memory param = params[i];
@@ -323,6 +325,11 @@ contract VeloOracle is IVeloOracle {
         }
     }
 
+    /// @notice Internal function to get the CL pool for srcToken and dstToken with the largest virtual reserve, and returns the virtual reserves
+    /// @param srcToken Source token of the pair
+    /// @param dstToken Destination token of the pair
+    /// @return srcVirtualBalance Virtual reserve of the source token
+    /// @return dstVirtualBalance Virtual reserve of the destination token
     function _getVirtualBalances(IERC20Metadata srcToken, IERC20Metadata dstToken)
         internal
         view
