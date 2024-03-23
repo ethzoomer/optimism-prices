@@ -26,6 +26,7 @@ contract VeloOracle is IVeloOracle {
     address public immutable factoryV2;
     ICLFactory public immutable CLFactory;
 
+    address owner;
     mapping(address => mapping(address => ICLPool[])) public enabledCLPools;
 
     /// @notice Maximum number of hops allowed for rate calculations
@@ -35,6 +36,7 @@ contract VeloOracle is IVeloOracle {
     constructor(address _factoryV2, address _CLFactory) {
         factoryV2 = _factoryV2;
         CLFactory = ICLFactory(_CLFactory);
+        owner = msg.sender;
     }
 
     /// @notice Struct to hold balance information for a pair
@@ -82,8 +84,14 @@ contract VeloOracle is IVeloOracle {
         int24 tickSpacing;
     }
 
-    /// @notice Permissioned function to enable routing through certain CL
+    function change_owner(address _owner) public {
+        require(msg.sender == owner);
+        owner = _owner;
+    }
+
+    /// @notice Permissioned function to enable routing through certain CL pools
     function enableCLPairTickSpacing(CLPairParams[] calldata params) public{
+        require(msg.sender == owner);
         for (uint256 i; i < params.length; i++){
             CLPairParams memory param = params[i];
             address pair = CLFactory.getPool(param.tokenA, param.tokenB, param.tickSpacing);
