@@ -78,7 +78,7 @@ contract VeloOracle is IVeloOracle {
     }
 
     /// @notice Struct to hold variables needed to identify CL pools
-    struct CLPairParams{
+    struct CLPairParams {
         address tokenA;
         address tokenB;
         int24 tickSpacing;
@@ -90,14 +90,14 @@ contract VeloOracle is IVeloOracle {
     }
 
     /// @notice Permissioned function to enable routing through certain CL pools
-    function enableCLPairTickSpacing(CLPairParams[] calldata params) public{
+    function enableCLPairTickSpacing(CLPairParams[] calldata params) public {
         require(msg.sender == owner);
-        for (uint256 i; i < params.length; i++){
+        for (uint256 i; i < params.length; i++) {
             CLPairParams memory param = params[i];
             address pair = CLFactory.getPool(param.tokenA, param.tokenB, param.tickSpacing);
             require(pair != address(0x0));
-            enabledCLPools[param.tokenA][param.tokenB].push( ICLPool(pair) );
-            enabledCLPools[param.tokenB][param.tokenA].push( ICLPool(pair) );
+            enabledCLPools[param.tokenA][param.tokenB].push(ICLPool(pair));
+            enabledCLPools[param.tokenB][param.tokenA].push(ICLPool(pair));
         }
     }
 
@@ -143,7 +143,6 @@ contract VeloOracle is IVeloOracle {
             out.mod = true;
             (out.bal0, out.bal1, out.isStable) = (maxPair1, maxPair2, isMaxStable);
         }
-
     }
 
     /**
@@ -281,7 +280,7 @@ contract VeloOracle is IVeloOracle {
         uint256 newOut = 0;
 
         // newOut in t1
-        try IVeloPair(currentPair).getAmountOut((10**t0_dec), address(t0)) returns (uint256 result) {
+        try IVeloPair(currentPair).getAmountOut((10 ** t0_dec), address(t0)) returns (uint256 result) {
             newOut = result;
         } catch {
             return 0;
@@ -341,29 +340,27 @@ contract VeloOracle is IVeloOracle {
     function _getVirtualBalances(IERC20Metadata srcToken, IERC20Metadata dstToken)
         internal
         view
-        returns (uint256 srcVirtualBalance, uint256 dstVirtualBalance){
+        returns (uint256 srcVirtualBalance, uint256 dstVirtualBalance)
+    {
+        uint256 maxLiquidity;
+        bool isSrcToken0 = srcToken < dstToken;
+        ICLPool[] memory pools = enabledCLPools[address(srcToken)][address(dstToken)];
 
-            uint256 maxLiquidity;
-            bool isSrcToken0 = srcToken < dstToken;
-            ICLPool[] memory pools = enabledCLPools[address(srcToken)][address(dstToken)];
+        for (uint256 i; i < pools.length; i++) {
+            ICLPool pool = pools[i];
+            uint256 liquidity = uint256(pool.liquidity());
 
-            for(uint256 i; i < pools.length; i++){
-                ICLPool pool = pools[i];
-                uint256 liquidity = uint256(pool.liquidity());
+            if (liquidity > maxLiquidity) {
+                (uint160 sqrtPriceX96,,,,,) = pool.slot0();
 
-                if (liquidity > maxLiquidity){
-                    (uint160 sqrtPriceX96, , , , ,) = pool.slot0();
+                (srcVirtualBalance, dstVirtualBalance) = isSrcToken0
+                    ? ((liquidity << 96) / sqrtPriceX96, (liquidity * (sqrtPriceX96 >> 32)) >> 64)
+                    : ((liquidity * (sqrtPriceX96 >> 32)) >> 64, (liquidity << 96) / sqrtPriceX96);
 
-                    (srcVirtualBalance, dstVirtualBalance) = 
-                        isSrcToken0 ? 
-                            ( (liquidity << 96) / sqrtPriceX96           , (liquidity * (sqrtPriceX96 >> 32 ) ) >> 64 )
-                        :   ( (liquidity * (sqrtPriceX96 >> 32 ) ) >> 64 , (liquidity << 96) / sqrtPriceX96  );
-                    
-                    maxLiquidity = liquidity;
-                }
+                maxLiquidity = liquidity;
             }
-
         }
+    }
 
     /// @notice Internal function to fetch the pair from tokens using correct order
     /// @param tokenA First input token
@@ -387,4 +384,3 @@ contract VeloOracle is IVeloOracle {
         return a < b ? a : b;
     }
 }
-

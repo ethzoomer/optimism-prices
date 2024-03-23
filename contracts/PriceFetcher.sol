@@ -26,15 +26,15 @@ contract PriceFetcher {
         }
     }
 
-    function add_tokens(bool is_connector, address[] calldata _tokens) public{
+    function add_tokens(bool is_connector, address[] calldata _tokens) public {
         _only_owner();
         IERC20Metadata[] storage arr = is_connector ? connectors : source_tokens;
         for (uint256 i = 0; i < _tokens.length; i++) {
-            arr.push( IERC20Metadata(_tokens[i]) );
+            arr.push(IERC20Metadata(_tokens[i]));
         }
     }
 
-    function remove_tokens(bool is_connector, uint256[] calldata _indices) public{
+    function remove_tokens(bool is_connector, uint256[] calldata _indices) public {
         _only_owner();
         IERC20Metadata[] storage arr = is_connector ? connectors : source_tokens;
         for (uint256 i = 0; i < _indices.length; i++) {
@@ -43,12 +43,16 @@ contract PriceFetcher {
         }
     }
 
-    function change_USDC(address _USDC) public{
+    function change_USDC(address _USDC) public {
         _only_owner();
         USDC = IERC20Metadata(_USDC);
     }
 
-    function _construct_oracle_args(uint256 _src_len, uint256 _src_offset) internal view returns (IERC20Metadata[] memory oracle_args){
+    function _construct_oracle_args(uint256 _src_len, uint256 _src_offset)
+        internal
+        view
+        returns (IERC20Metadata[] memory oracle_args)
+    {
         oracle_args = new IERC20Metadata[]( _src_len + connectors.length + 1);
         for (uint256 i = _src_offset; i < _src_offset + _src_len; i++) {
             oracle_args[i - _src_offset] = source_tokens[i];
@@ -72,7 +76,7 @@ contract PriceFetcher {
         USDC = IERC20Metadata(_USDC);
     }
 
-    function _only_owner() internal view{
+    function _only_owner() internal view {
         require(msg.sender == owner);
     }
 
@@ -111,15 +115,15 @@ contract PriceFetcher {
     /// @notice Fetches prices for a list of tokens.
     /// @dev Can only be called by the owner. Emits a PriceFetched event for each token.
     /// @param _src_len The number of source tokens to fetch prices for.
-    /// @param _src_offset The number of source tokens to skip. 
-    function fetchPrices(uint _src_len, uint _src_offset) public {
+    /// @param _src_offset The number of source tokens to skip.
+    function fetchPrices(uint256 _src_len, uint256 _src_offset) public {
         require(msg.sender == owner || callers[msg.sender]);
 
-        uint256[] memory prices = oracle.getManyRatesWithConnectors(uint8(_src_len), _construct_oracle_args(_src_len, _src_offset));
+        uint256[] memory prices =
+            oracle.getManyRatesWithConnectors(uint8(_src_len), _construct_oracle_args(_src_len, _src_offset));
 
-        for (uint i = _src_offset; i < _src_offset + _src_len; i++) {
-            emit PriceFetched( address(source_tokens[i]), prices[i - _src_offset]);
+        for (uint256 i = _src_offset; i < _src_offset + _src_len; i++) {
+            emit PriceFetched(address(source_tokens[i]), prices[i - _src_offset]);
         }
     }
-
 }
