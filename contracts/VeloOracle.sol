@@ -101,6 +101,45 @@ contract VeloOracle is IVeloOracle {
         }
     }
 
+    /// @notice Permissioned function to disable routing through certain CL pools
+    function disableCLPairTickSpacing(CLPairParams[] calldata params) public {
+        require(msg.sender == owner);
+        for (uint256 i; i < params.length; i++) {
+            CLPairParams memory param = params[i];
+            address pair = CLFactory.getPool(param.tokenA, param.tokenB, param.tickSpacing);
+            require(pair != address(0x0));
+            
+            // Remove the CLPool from the enabledCLPools mappings
+            removeCLPool(param.tokenA, param.tokenB, pair);
+            removeCLPool(param.tokenB, param.tokenA, pair);
+        }
+    }
+
+    function removeCLPool(address tokenA, address tokenB, address pair) private {
+        // Find the index of the pair in the array for tokenA to tokenB
+        uint256 index = findCLPoolIndex(enabledCLPools[tokenA][tokenB], pair);
+        require(index < enabledCLPools[tokenA][tokenB].length, "Pair not found");
+        // Remove the pair by swapping it with the last element and then popping the array
+        enabledCLPools[tokenA][tokenB][index] = enabledCLPools[tokenA][tokenB][enabledCLPools[tokenA][tokenB].length - 1];
+        enabledCLPools[tokenA][tokenB].pop();
+
+        // Repeat for tokenB to tokenA
+        index = findCLPoolIndex(enabledCLPools[tokenB][tokenA], pair);
+        require(index < enabledCLPools[tokenB][tokenA].length, "Pair not found");
+        enabledCLPools[tokenB][tokenA][index] = enabledCLPools[tokenB][tokenA][enabledCLPools[tokenB][tokenA].length - 1];
+        enabledCLPools[tokenB][tokenA].pop();
+    }
+
+    function findCLPoolIndex(ICLPool[] storage pools, address pair) private view returns (uint256) {
+        for (uint256 i = 0; i < pools.length; i++) {
+            if (address(pools[i]) == pair) {
+                return i;
+            }
+        }
+        // Return an out-of-bounds index if the pair is not found
+        return pools.length;
+    }
+
     /// @notice Internal function to get balance of two tokens
     /// @param from First token of the pair
     /// @param to Second token of the pair
