@@ -1,14 +1,18 @@
-from brownie import accounts, VeloOracle
-from scripts.get_tokens import get_tokens
+from brownie import accounts, VeloOracle, chain
+from scripts.get_tokens import get_tokens_base, get_tokens_op
+import json
 
-oracle = VeloOracle.at('0x395942C2049604a314d39F370Dfb8D87AAC89e16')
+if chain.id == 10:
+    src, symbols = get_tokens_op()
+    data = json.load(open('./config.json'))['velo']
+    oracle = VeloOracle.at('0x6a3af44e23395d2470f7c81331add6ede8597306')
+elif chain.id == 8453:
+    src, symbols = get_tokens_base()
+    data = json.load(open('./config.json'))['aero']
+    oracle = VeloOracle.at('0xCbF5b6abF55Fb87271338097FDd03E9d82a9d63f')
 
-# https://dune.com/queries/2678719
-src, symbols = get_tokens()
-
-connectors = ['0x9560e827aF36c94D2Ac33a39bCE1Fe78631088Db', '0x4200000000000000000000000000000000000042', '0x4200000000000000000000000000000000000006', '0x9bcef72be871e61ed4fbbc7630889bee758eb81d', '0x2e3d870790dc77a83dd1d18184acc7439a53f475', '0x8c6f28f2f1a3c87f0f938b96d27520d9751ec8d9', '0x1f32b1c2345538c0c6f582fcb022739c4a194ebb', '0xbfd291da8a403daaf7e5e9dc1ec0aceacd4848b9', '0xc3864f98f2a61a7caeb95b039d031b4e2f55e0e9', '0x9485aca5bbbe1667ad97c7fe7c4531a624c8b1ed', '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', '0x73cb180bf0521828d8849bc8cf2b920918e23032', '0x6806411765af15bddd26f8f544a34cc40cb9838b', '0x6c2f7b6110a37b3b0fbdd811876be368df02e8b0', '0xc5b001dc33727f8f26880b184090d3e252470d45']
-
-dst = '0x7F5c764cBc14f9669B88837ca1490cCa17c31607' # USDC
+connectors = data['connectors']
+dst = data['dst']
 
 results = []
 call_length = 150
@@ -16,6 +20,9 @@ for start_i in range(0,len(src),call_length):
   in_connectors = src[start_i:start_i + call_length] + connectors + [dst]
   results.extend(oracle.getManyRatesWithConnectors(len(src[start_i:start_i + call_length]), in_connectors))
 
-for i,res in enumerate(results):
-   if res == 0:
-      print(symbols[i])
+# for i,res in enumerate(results):
+#    if res == 0:
+#       print(symbols[i])
+
+for sym, price in zip(symbols, results):
+   print(sym, price/1e18)
