@@ -6,8 +6,8 @@ The Optimism Prices contracts are a lightweight, trustless, and reliable method 
 
 ```
 {
-    'Optimism': '0xcA97e5653d775cA689BED5D0B4164b7656677011',
-    'Base': '0xee717411f6E44F9feE011835C8E6FAaC5dEfF166'
+    'Optimism': '0x6a3af44e23395d2470f7c81331add6ede8597306',
+    'Base': '0xCbF5b6abF55Fb87271338097FDd03E9d82a9d63f'
 }
 ```
 
